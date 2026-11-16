@@ -599,7 +599,10 @@ The main ones:
   pane ends with it, keeping its exit code; that shell PATH needs sh, bash, zsh, dash, ksh or
   fish: with other shells (nushell) and on Windows `argv` runs directly), `pane.close {pane?}`,
   `pane.zoom {pane?}`, `pane.focus {pane | terminal}`, `pane.go {direction}`,
-  `pane.swap {pane?, direction | target}`.
+  `pane.swap {pane?, direction | target}`,
+  `pane.view {pane?, mod?, props?}` (a mod drawn in place of the pane's terminal, which keeps
+  running and attached; the mod's props also get `pane` and `terminal`; no `mod`: the terminal
+  again; `panes()[i].view` names it; not saved, like `terminal.show`).
   `pane.zoom` also makes the pane its tab's focused one (the tab isn't
   selected); on the zoomed pane it unzooms and focus stays.
   `pane.go` prefers the most recently focused pane along the nearest edge in that
@@ -612,7 +615,7 @@ The main ones:
   A swap moves panes, not focus: the focused pane stays focused in its new place.
   `pane.focus {terminal}` prefers the first visible layout terminal block showing that
   address, then its model pane. Clicking a terminal block focuses it too.
-  While a layout terminal block is focused, implicit split/close/zoom/go/swap and
+  While a layout terminal block is focused, implicit split/close/zoom/go/swap/view and
   `terminal.show` fail, as do `terminal.open`/`terminal.keep` with place right/down.
   They never act on the terminal's source pane. An explicit `pane` still targets that
   model pane; composition edits belong to the mod (edit its layout instead).
@@ -1117,6 +1120,9 @@ All of it is in `herdr.d.ts`. In short:
   rejects if the check fails (failed checks are not cached); start one with `argv: agent.run`.
   `pickFolder({ prompt })`: the system's folder picker (here only),
   resolves with the folder or null.
+  `pickFiles({ multiple, images, prompt })`: the file picker (here only),
+  resolves with absolute paths (`[]` when cancelled; `images: true` keeps image files only).
+  `clipboardImage()`: the clipboard's image saved as a PNG (its path, kept a day), or null.
 - Files: `readTextFile(path, { on })` (here, or on that machine),
   `writeTextFile(path, text, expected)` (here only), and
   `watchFolder(dir)` (here only; poll a remote space's folder): resolves with the changed paths the next time anything
@@ -1143,7 +1149,8 @@ All of it is in `herdr.d.ts`. In short:
   sees it; setting re-renders all), `nextCommand()` (key commands for this
   mod: `cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); …; cx.notify(); } })`).
 
-Mods are trusted code: commands and network access (including `fetch`) are unrestricted.
+Mods are trusted code: commands and network access (including `fetch`) are unrestricted;
+`WebSocket.connect(url, { headers })` (from `"websocket"`) may send `Authorization` and `Cookie`.
 Other built-ins: `localStorage` (per mod copy), `console.log`, `fetch`,
 `import * as fs from "fs/promises"` (read in home, write under `~/.config/herdr-app`).
 

@@ -972,6 +972,47 @@ fn exec_future(command: String, args: Vec<String>, cwd: Option<String>, on: Opti
     }
 }
 
+/// The system picker for this machine's files or folders: resolves with the
+/// chosen paths, none when the person cancels.
+fn pick_paths(directories: bool, multiple: bool, prompt: &str) -> Result<impl std::future::Future<Output = Vec<PathBuf>> + use<>, HostError> {
+    let picked = gpui_shell::with_current_app(|cx| cx.prompt_for_paths(gpui::PathPromptOptions {
+        files: !directories, directories, multiple, prompt: Some(prompt.to_owned().into()),
+    })).ok_or_else(|| HostError::new("no window to pick from"))?;
+    Ok(async move { picked.await.ok().and_then(Result::ok).flatten().unwrap_or_default() })
+}
+
+/// The clipboard's image, as it was copied.
+fn clipboard_image_bytes() -> Option<Vec<u8>> {
+    gpui_shell::with_current_app(|cx| {
+        cx.read_from_clipboard()?.entries().iter().find_map(|e| match e {
+            gpui::ClipboardEntry::Image(i) => Some(i.bytes.clone()),
+            _ => None,
+        })
+    }).flatten()
+}
+
+/// Keeps an image as a PNG file in `dir` (`clipboardImage`); files there
+/// older than a day go, so a chat pasting all day doesn't fill the disk.
+fn save_png(dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+    let png = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        bytes.to_vec()
+    } else {
+        let img = image::load_from_memory(bytes).map_err(|_| "the clipboard image isn't one Herdr can read".to_owned())?;
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+        out.into_inner()
+    };
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let day_ago = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < day_ago) { let _ = std::fs::remove_file(e.path()); }
+    }
+    let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+    let path = dir.join(format!("clipboard-{stamp}.png"));
+    std::fs::write(&path, png).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 fn module(inst: Instance, copy: u64) -> HostModule {
     let reads = Rc::new(RefCell::new(LiveReads::default()));
     LIVE_READS.with_borrow_mut(|copies| {
@@ -1029,13 +1070,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .function("feedbackPasteImage", move |_| {
             if !feedback_frame { return Err(HostError::new("feedback screenshots are frame-only")); }
-            let bytes = gpui_shell::with_current_app(|cx| {
-                cx.read_from_clipboard()?.entries().iter().find_map(|e| match e {
-                    gpui::ClipboardEntry::Image(i) => Some(i.bytes.clone()),
-                    _ => None,
-                })
-            }).flatten();
-            Ok(match bytes {
+            Ok(match clipboard_image_bytes() {
                 None => HostValue::Null,
                 Some(b) => to_host(&match crate::feedback::attach(&b) { Ok(path) => json!({ "path": path }), Err(e) => json!({ "error": e }) }),
             })
@@ -1047,12 +1082,9 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .async_function("feedbackPickImages", move |_| {
             if !feedback_frame { return Err(HostError::new("feedback screenshots are frame-only")); }
-            let picked = gpui_shell::with_current_app(|cx| cx.prompt_for_paths(gpui::PathPromptOptions {
-                files: true, directories: false, multiple: true, prompt: Some("Add".into()),
-            })).ok_or_else(|| HostError::new("no window to pick from"))?;
+            let picked = pick_paths(false, true, "Add")?;
             Ok(async move {
-                let paths = picked.await.ok().and_then(Result::ok).flatten().unwrap_or_default();
-                let out = crate::feedback::attach_files(&paths);
+                let out = crate::feedback::attach_files(&picked.await);
                 Ok(to_host(&Value::Array(out)))
             })
         })
@@ -1071,12 +1103,31 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .async_function("pickFolder", |a| {
             let prompt = a.get(0).map(from_host).and_then(|v| v.get("prompt").and_then(Value::as_str).map(str::to_owned)).unwrap_or_else(|| "Open".into());
-            let picked = gpui_shell::with_current_app(|cx| cx.prompt_for_paths(gpui::PathPromptOptions {
-                files: false, directories: true, multiple: false, prompt: Some(prompt.into()),
-            })).ok_or_else(|| HostError::new("no window to pick from"))?;
+            let picked = pick_paths(true, false, &prompt)?;
             Ok(async move {
-                let path = picked.await.ok().and_then(Result::ok).flatten().and_then(|p| p.into_iter().next());
+                let path = picked.await.into_iter().next();
                 Ok(path.map(|p| HostValue::Str(p.to_string_lossy().into_owned())).unwrap_or(HostValue::Null))
+            })
+        })
+        .async_function("pickFiles", |a| {
+            let options = a.get(0).map(from_host).unwrap_or(Value::Null);
+            let flag = |k: &str| options.get(k).and_then(Value::as_bool).unwrap_or(false);
+            let images = flag("images");
+            let prompt = options.get("prompt").and_then(Value::as_str).unwrap_or("Open").to_owned();
+            let picked = pick_paths(false, flag("multiple"), &prompt)?;
+            Ok(async move {
+                let paths = picked.await.into_iter()
+                    .filter(|p| !images || image::ImageFormat::from_path(p).is_ok())
+                    .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                    .collect();
+                Ok(to_host(&Value::Array(paths)))
+            })
+        })
+        .function("clipboardImage", {
+            let dir = app_dir().join("data").join(&inst.name).join("clipboard");
+            move |_| Ok(match clipboard_image_bytes() {
+                None => HostValue::Null,
+                Some(bytes) => save_png(&dir, &bytes).map_err(HostError::new)?.to_string_lossy().into_owned().into(),
             })
         })
         .function("feedbackClearImages", move |_| {

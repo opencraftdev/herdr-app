@@ -285,6 +285,16 @@ Show a terminal in a pane for now, in place of its own (no terminal: back).
 | `terminal` | no |
 | `pane` | no |
 
+## `pane.view`
+
+Show a mod in a pane (default: the focused one) in place of its terminal, which keeps running; the mod gets props plus pane and terminal. No mod: the terminal again. Not saved.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `mod` | no |
+| `props` | no |
+
 ## `terminal.select_all`
 
 Select a terminal's whole screen and scrollback (default: the focused one), ready to copy. On the alternate screen, select only that screen.

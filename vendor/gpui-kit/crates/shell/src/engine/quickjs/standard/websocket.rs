@@ -15,6 +15,7 @@ use rquickjs::{
     function::{Func, Opt},
     module::{Declarations, Exports, ModuleDef},
 };
+use crate::capability::NetworkGrant;
 use tungstenite::{
     HandshakeError, Message, WebSocket,
     client::IntoClientRequest,
@@ -97,10 +98,15 @@ fn parse_headers<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<HeaderMap> {
         ));
     };
     let mut headers = HeaderMap::new();
+    // HERDR: an unrestricted network grant (Herdr's mods) may already send any
+    // credential over fetch, so its WebSocket handshake may carry them too.
+    let credentials = matches!(host::capabilities().network_grant(), NetworkGrant::Unrestricted);
     for entry in object.props::<String, Value>() {
         let (name, value) = entry?;
         let normalized = name.to_ascii_lowercase();
-        if is_forbidden_handshake_header(&normalized) {
+        if is_forbidden_handshake_header(&normalized)
+            && !(credentials && matches!(normalized.as_str(), "authorization" | "cookie"))
+        {
             return Err(Exception::throw_type(
                 ctx,
                 &format!(

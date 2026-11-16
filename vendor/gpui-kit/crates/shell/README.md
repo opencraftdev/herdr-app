@@ -402,8 +402,9 @@ async `read`, `write`, and `close` methods for text and binary messages. Frames
 and messages are limited to 8 MiB. Connect/handshake and writes have 30-second
 transport deadlines. A pending `read()` has no public timeout and waits for a
 message, close, or error; only one read may be outstanding, while writes and
-close are still serviced as it waits. Credential and handshake-control headers
-are refused. Each socket has an 8-command queue shared by reads, writes, and
+close are still serviced as it waits. Handshake-control headers
+are refused, and credential headers (Authorization, Cookie) are refused unless
+the network grant is unrestricted. Each socket has an 8-command queue shared by reads, writes, and
 close; a new operation rejects when that queue is full.
 
 `fs/promises` exposes the promise-only filesystem subset; there is deliberately
