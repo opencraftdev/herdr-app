@@ -1,9 +1,10 @@
 // Workspace spaces: stable colored avatars, worktrees under their checkout,
 // grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
+// its first terminal is in now, only where unusual: branch, ahead/behind. Under each space, its
+// sessions (one row per tab: its agent or program, title and status), folded per space. Click to
 // switch, right-click for its menu, drag to reorder.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
@@ -26,6 +27,7 @@ function place(s, ps) {
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
 const ROW = 32;
+const SUB = 30; // a session row
 // A row's first and last cells: the folder (or tree line) and the status.
 const CELL = 34;
 const RAIL_CELL = 32;
@@ -65,6 +67,40 @@ export function marker(t, status) {
   return null;
 }
 
+// A session's title, as the agents list reads it: what the agent put before its title
+// (a status glyph, Codex's "[ ! ] ") goes, and a tab someone named keeps its name.
+const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}\p{Ps}\p{Pi}]+/u, "").replace(/^\[ [!.] \] /, "").trim();
+export function title(tab, l) {
+  const prog = l?.program?.name;
+  const live = clean(l?.title);
+  const path = /^[~/]|^[A-Za-z]:\\/.test((l?.title ?? "").replace(/^[^\p{L}\p{N}~/]+/u, ""));
+  const telling = live && live !== (l?.terminal ?? l?.address) && live !== prog && !path && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
+  return (tab.name === prog || !tab.named) && telling ? live : tab.name;
+}
+
+// A space's sessions: its tabs not put away, each with its lead pane (its first agent,
+// else its focused terminal, else its first). `ps`: panes(), read once by the caller.
+export function sessions(s, ps) {
+  const leads = new Map();
+  for (const p of ps) {
+    if (!p.terminal) continue;
+    const l = leads.get(p.tab);
+    if (!l || (!l.program?.agent && (p.program?.agent || (!l.focused && p.focused)))) leads.set(p.tab, p);
+  }
+  return (s.tabs ?? []).filter((c) => !c.settled).map((tab) => {
+    const lead = leads.get(tab.id) ?? null;
+    const name = title(tab, lead);
+    // An automatic tab number says little: its program does ("Claude Code", "zsh").
+    return { tab, lead, title: /^\d+$/.test(name) ? lead?.program?.name || name : name };
+  });
+}
+
+// The program's icon from the app's program table: a one-color glyph or a picture.
+function icon(p, size, color) {
+  if (!p?.icon) return svg("mods/workspace-chrome/terminal.svg").size(size).flex_none().text_color(color);
+  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
+}
+
 // A space speaks up only when something in it needs you.
 export function glyph(status) {
   return status === "blocked" || status === "done" ? "●" : "·";
@@ -99,6 +135,7 @@ export default class Spaces extends View {
       for (const state of Object.values(this.reconnecting)) state.busy = false;
     } catch { this.reconnecting = {}; }
     try { this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]")); } catch { this.folded = new Set(); }
+    try { this.closed = new Set(JSON.parse(localStorage.getItem("spaces.closed") ?? "[]")); } catch { this.closed = new Set(); } // spaces whose sessions are folded
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // Refresh only when the refs could have changed (see `due`).
@@ -297,6 +334,12 @@ export default class Spaces extends View {
     });
   }
 
+  // Folds or unfolds a space's sessions, remembered across restarts.
+  toggle(id) {
+    this.closed.has(id) ? this.closed.delete(id) : this.closed.add(id);
+    localStorage.setItem("spaces.closed", JSON.stringify([...this.closed]));
+  }
+
   menu(w) {
     // A popup is as tall as its items; height is only the most.
     openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
@@ -319,10 +362,11 @@ export default class Spaces extends View {
     const placed = new Set(); // repos whose worktrees are listed (under the first of its spaces)
     for (const r of list) {
       if (nested(r)) continue;
-      out.push({ ...r, tree: null });
-      if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
+      const head = !r.g || r.g.linked || placed.has(r.g.repo);
+      const kids = head ? [] : list.filter((k) => nested(k) && k.g.repo === r.g.repo);
+      out.push({ ...r, tree: null, kids: kids.length });
+      if (head) continue;
       placed.add(r.g.repo);
-      const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
       kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
     }
     // Simulate the batch so later indexes include earlier moves. An attempted
@@ -350,7 +394,8 @@ export default class Spaces extends View {
   // The rows, under a header per machine once one isn't this computer.
   grouped(t, collapsed) {
     const rows = this.ordered();
-    const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
+    const ps = panes();
+    const draw = (r) => (collapsed ? this.compact(r, t) : this.group(r, t, ps));
     // Where the active space's row lands among the children this returns: the list scrolls by its direct
     // children, and machine headers, login notes and loading rows count too.
     this.activeAt = -1;
@@ -453,8 +498,37 @@ export default class Spaces extends View {
       .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(BEHIND).child(`\u2193${g.behind}`)));
   }
 
-  row({ w, i, g, tree }, t) {
-    const on = w.active;
+  // A space's row and, unless folded, its sessions under it. One child of the list, so
+  // the active space's place in it stays one per space.
+  group(r, t, ps) {
+    const list = sessions(r.w, ps);
+    const open = list.length > 0 && !this.closed.has(r.w.id);
+    const row = this.row(r, t, list.length, open);
+    if (!open) return row;
+    // Tree lines: a worktree's sessions sit one level deeper, under its own line.
+    const H = SUB;
+    const line = (width, x, kind) => div().relative().w(width).h_full().flex_none()
+      .when(kind !== " ", (el) => el.child(div().absolute().left(x).top(0).w(1).bg(t.input).h(kind === "\u2514" ? H / 2 : H)))
+      .when(kind === "\u251c" || kind === "\u2514", (el) => el.child(div().absolute().left(x).top(H / 2).w(8).h(1).bg(t.input)));
+    return v_flex().flex_none().child(row).children(list.map(({ tab, lead, title }, n) => {
+      const last = n === list.length - 1 && !(r.kids > 0);
+      const mark = last ? "\u2514" : "\u251c";
+      const guides = r.tree ? [line(CELL, 17, r.tree === "\u2514\u2500" ? " " : "\u2502"), line(20, 4, mark)] : [line(CELL, 17, mark)];
+      const on = r.w.active && tab.active;
+      return h_flex().id(`session-${tab.id}`).h(SUB).flex_none().rounded(8).gap(6).items_center().text_size(13).cursor_pointer()
+        .when(on, (el) => el.bg(t.selected))
+        .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+        .on_click(() => run("tab.select", { id: tab.id }))
+        .children(guides)
+        .child(icon(lead?.program, 16, on ? t.foreground : t.dim))
+        .child(div().flex_1().min_w(0).truncate().text_color(on ? t.solid : t.foreground).child(title))
+        .child(h_flex().w(24).flex_none().justify_center().children([marker(t, tab.status)].filter(Boolean)));
+    }));
+  }
+
+  row({ w, i, g, tree }, t, count = 0, open = false) {
+    // With its sessions shown, the selected one is highlighted instead of the space.
+    const on = w.active && !open;
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     const colors = shared("space.colors") ?? {};
     const color = colors[w.id] ?? "ansi6";
@@ -508,8 +582,15 @@ export default class Spaces extends View {
             .child(div().absolute().left(17).top(0).w(1).bg(t.input).when(tree === "└─", l => l.h(ROW / 2)).when(tree !== "└─", l => l.h(ROW)))
             .child(div().absolute().left(17).top(ROW / 2).w(10).h(1).bg(t.input))))
           .when(!tree, el => el.child(h_flex().w(CELL).flex_none().justify_center().child(svg("mods/workspace-chrome/folder.svg").size(18).text_color(fill))))
-          .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(on ? t.solid : t.foreground).child(w.name))
+          .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(w.active ? t.solid : t.foreground).child(w.name))
           .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
+          // Folds its sessions; folded, it says how many there are.
+          .when(count > 0, (el) => el.child(h_flex().id(`space-fold-${w.id}`).flex_none().gap(3).px(3).h(20).rounded(4).items_center()
+            .text_size(12).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+            .tooltip(open ? "Hide sessions" : "Show sessions")
+            .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.toggle(w.id); cx.notify(); })
+            .when(!open, (el) => el.child(String(count)))
+            .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())))
           .child(h_flex().w(24).flex_none().justify_center().children([marker(t, w.status)].filter(Boolean))),
       );
   }

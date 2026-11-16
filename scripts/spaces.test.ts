@@ -23,7 +23,7 @@ function harness(replies: unknown[] = [], storage = new Map<string, string>(), s
     if (method === "track_scroll") tracked.push(args[0]);
     return element;
   } });
-  const Spaces = new Function("View", "hc", "localStorage", "spaces", "panes", "run", "v_flex", "h_flex", "div", "svg", "shared", "machines", "exec", "window", "watchFolder", "ScrollHandle", "theme", "layout", "setShared", `${source}; return Spaces;`)(
+  const Spaces = new Function("View", "hc", "localStorage", "spaces", "panes", "run", "v_flex", "h_flex", "div", "svg", "shared", "machines", "exec", "window", "watchFolder", "ScrollHandle", "theme", "layout", "setShared", "image", `${source}; return Spaces;`)(
     class {},
     async (args: string[]) => {
       calls.push(args);
@@ -38,7 +38,7 @@ function harness(replies: unknown[] = [], storage = new Map<string, string>(), s
       moves.push(args);
     },
     ...Array(4).fill(() => element), () => null, () => availability, execGit, () => ({ active: true }), watch,
-    ScrollHandle, theme, () => env.layout, () => {},
+    ScrollHandle, theme, () => env.layout, () => {}, () => element,
   );
   const view = new Spaces();
   view.reconnecting = {};
@@ -544,4 +544,43 @@ test("the list reveals the active space again when a machine header shifts its p
   expect(h.view.scroll.calls).toEqual([1, 2]);
   h.view.render();
   expect(h.view.scroll.calls).toEqual([1, 2]);
+});
+
+// A space's sessions: the pure helpers, with the gpui and herdr names stubbed out.
+const helpers = new Function("View", "svg", "image", "div", `${source}; return { sessions, title };`)(class {}, () => null, () => null, () => null);
+const prog = (key: string, agent = false) => ({ key, name: key === "claude" ? "Claude Code" : key, icon: null, tint: true, tile: null, color: null, shell: key === "zsh", agent });
+
+test("a space lists its tabs not put away, each by its agent first, with a clean title", () => {
+  const tab = (id: string, extra = {}) => ({ id, index: 1, name: "1", named: false, active: false, status: null, panes: 1, zoomed: false, settled: false, settled_at: null, changed_at: null, working_since: null, ...extra });
+  const space = { id: "s", tabs: [tab("t1"), tab("t2", { name: "logs", named: true }), tab("t3", { settled: true })] };
+  const ps = [
+    { pane: "p1", terminal: "a", tab: "t1", title: "~/repo", focused: true, program: prog("zsh") },
+    { pane: "p2", terminal: "b", tab: "t1", title: "✳ Fix the flaky test", focused: false, program: prog("claude", true) },
+    { pane: "p3", terminal: "c", tab: "t2", title: "git log", focused: false, program: prog("git") },
+  ];
+  const list = helpers.sessions(space, ps);
+  expect(list.map((s: any) => [s.tab.id, s.lead?.pane, s.title])).toEqual([["t1", "p2", "Fix the flaky test"], ["t2", "p3", "logs"]]);
+  // A path or the program's own name isn't a title: the tab's name stays.
+  expect(helpers.title(tab("x", { name: "2" }), { title: "~/repo", program: prog("zsh") })).toBe("2");
+  // A mod-only tab has no lead terminal.
+  expect(helpers.sessions({ id: "m", tabs: [tab("t9", { name: "files", named: true })] }, [])[0]).toMatchObject({ lead: null, title: "files" });
+});
+
+test("folding a space's sessions is remembered", () => {
+  const h = harness();
+  h.view.closed = new Set();
+  h.view.toggle("s1");
+  expect(JSON.parse(h.storage.get("spaces.closed")!)).toEqual(["s1"]);
+  h.view.toggle("s1");
+  expect(JSON.parse(h.storage.get("spaces.closed")!)).toEqual([]);
+});
+
+test("a main checkout knows how many worktrees follow it, for its sessions' tree line", () => {
+  const h = harness([], new Map(), [{ id: "main", folder: "/r" }, { id: "wt", folder: "/r-wt" }]);
+  h.view.shown = new Set(["main", "wt"]);
+  h.view.git = {
+    [JSON.stringify([null, "/r"])]: { name: "r", branch: "main", ahead: 0, behind: 0, repo: "R", linked: false },
+    [JSON.stringify([null, "/r-wt"])]: { name: "r", branch: "x", ahead: 0, behind: 0, repo: "R", linked: true },
+  };
+  expect(h.view.ordered().map((r: any) => [r.w.id, r.tree, r.kids])).toEqual([["main", null, 1], ["wt", "└─", undefined]]);
 });
