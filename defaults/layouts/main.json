@@ -113,7 +113,7 @@
                   "gap": 0,
                   "radius": 0,
                   "background": "background",
-                  "lone": false,
+                  "lone": true,
                   "border": {
                     "width": 1,
                     "color": "input"
