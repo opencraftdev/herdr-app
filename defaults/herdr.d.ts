@@ -41,6 +41,16 @@ export function knownAgents(options?: { on?: string | null }): Promise<(Program 
  *  when the person cancels. `prompt`: the confirm button's text (default "Open"). */
 export function pickFolder(options?: { prompt?: string }): Promise<string | null>;
 
+/** Opens the system's file picker (this machine). Resolves with the chosen files' absolute
+ *  paths, [] when the person cancels. `multiple`: more than one (default false); `images`: only
+ *  image files are kept (by extension); `prompt`: the confirm button's text (default "Open"). */
+export function pickFiles(options?: { multiple?: boolean; images?: boolean; prompt?: string }): Promise<string[]>;
+
+/** The clipboard's image saved as a PNG file (absolute path, under
+ *  ~/.config/herdr-app/data/<mod>/clipboard, removed after a day); null when the clipboard holds
+ *  no image. Throws if the image can't be read. */
+export function clipboardImage(): string | null;
+
 /** Plays "done" or "blocked" (the attention sounds, or the files settings.json names), or an MP3
  *  file (absolute, or relative to ~/.config/herdr-app). */
 export function playSound(sound: string): null;
