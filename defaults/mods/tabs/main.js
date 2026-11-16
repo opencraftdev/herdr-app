@@ -1,6 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, checking } from "herdr";
+import { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget } from "./chat.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -28,12 +29,46 @@ function label(tab, lead) {
 }
 
 export default class Tabs extends View {
-  init() {
+  init(_props, cx) {
     this.pressed = null;
+    this.chat = { pane: null, ovis: null }; // the pane the Chat icon opens, and its Ovis pane id
     this.scroll = ScrollHandle.new();
     try { this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { this.panels = {}; }
     if (!this.panels || typeof this.panels !== "object" || Array.isArray(this.panels)) this.panels = {};
     this.swipe = { acc: 0, steps: 0, at: 0, last: 0 };
+    if (checking() || !cx) return;
+    this.checkChat(cx);
+    cx.timer.every(3000, (cx) => this.checkChat(cx));
+  }
+
+  // whether Ovis sees an agent in the open tab's focused pane
+  checkChat(cx) {
+    const space = spaces().find(p => p.active);
+    const target = chatTarget(panes(), space?.tabs?.find(tab => tab.active)?.id);
+    if (!target) {
+      if (this.chat.ovis !== null) { this.chat = { pane: null, ovis: null }; cx.notify(); }
+      return;
+    }
+    cx.spawn(async (cx) => {
+      const ovis = ovisPaneId(await ovisPanes(ovisServer()), target.pane, target.terminal);
+      if (ovis !== this.chat.ovis || target.pane !== this.chat.pane) { this.chat = { pane: target.pane, ovis }; cx.notify(); }
+    });
+  }
+
+  // Chat | Terminal: two icons beside +, the active one pressed
+  chatButtons(t, selected) {
+    const target = chatTarget(panes(), selected);
+    if (!target) return null;
+    const shown = target.view === CHAT;
+    const ovis = this.chat.pane === target.pane ? this.chat.ovis : null;
+    if (!shown && !ovis) return null;
+    const icon = (id, name, tip, on, args) => h_flex().id(id).size(34).flex_none().items_center().justify_center().rounded(8).tooltip(tip)
+      .when(on, el => el.bg(t.hover).text_color(t.solid)).when(!on, el => el.text_color(t.dim))
+      .hover(s => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click(() => { if (!on) run("pane.view", args); }).child(svg(`mods/tabs/${name}.svg`).size(16));
+    return h_flex().flex_none().gap(4)
+      .child(icon("chat-view", "chat", "Chat", shown, { pane: target.pane, mod: CHAT, props: { server: ovisServer(), paneId: ovis ?? target.pane } }))
+      .child(icon("terminal-view", "terminal", "Terminal", !shown, { pane: target.pane }));
   }
 
   // One tab per wheel notch. A touchpad or smooth-scrolling mouse sends many
@@ -132,6 +167,7 @@ export default class Tabs extends View {
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = shared("workspace.panels") ?? ["files", "changes"];
     this.syncPanel(space, panel, body, enabled);
+    const chat = this.chatButtons(t, selected);
     const panelButton = (id, label, icon) => {
       const on = panel && !panel.hidden && body?.active === id;
       // A 34px icon square, pressed while its panel shows.
@@ -149,6 +185,7 @@ export default class Tabs extends View {
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(4).overflow_x_scrollbar().track_scroll(this.scroll)
         .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
         .children(shown.map(item)))
+      .when(Boolean(chat), el => el.child(chat))
       .child(button("tab-new", svg("mods/workspace-chrome/plus.svg").size(16), () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
