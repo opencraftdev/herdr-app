@@ -218,6 +218,11 @@ impl Capabilities {
         &self.execute
     }
 
+    // HERDR: the WebSocket handshake lets an unrestricted grant send credentials.
+    pub fn network_grant(&self) -> &NetworkGrant {
+        &self.network
+    }
+
     /// Whether any filesystem write is permitted at all. `os.remove` and
     /// friends need this before their path is even resolved.
     pub fn has_write_access(&self) -> bool {

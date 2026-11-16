@@ -707,3 +707,111 @@ export default class extends View {
     cx.run_until_parked();
     window.update(cx, |_, window, _| window.remove_window()).unwrap();
 }
+
+#[gpui::test]
+fn mods_may_send_credentials_in_a_websocket_handshake(cx: &mut TestAppContext) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0; 4096];
+        let count = stream.read(&mut request).unwrap();
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n").unwrap();
+        String::from_utf8_lossy(&request[..count]).to_ascii_lowercase()
+    });
+    cx.update(gpui_shell::init);
+    let fixture = Fixture::new(&r#"
+import { View, div } from "gpui-kit";
+import { WebSocket } from "websocket";
+import { note } from "fixture";
+export default class extends View {
+  init(_props, cx) {
+    cx.spawn(async () => {
+      try { await WebSocket.connect("ws://ADDRESS/", { headers: { Authorization: "Bearer token", Cookie: "a=b" } }); note("connected"); }
+      catch (error) { note(error.message); }
+      try { await WebSocket.connect("ws://ADDRESS/", { headers: { Host: "elsewhere" } }); }
+      catch (error) { note(error.message); }
+    });
+  }
+  render() { return div(); }
+}"#.replace("ADDRESS", &address.to_string()));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let calls = seen.clone();
+    gpui_shell::policy::set_default(Policy::new()
+        .with_capabilities(capabilities())
+        .with_host_module(HostModule::new("fixture").function("note", move |a| {
+            calls.borrow_mut().push(a.string(0)?.to_owned());
+            Ok(HostValue::Null)
+        })).unwrap());
+    let runtime = ShellRuntime::new_isolated().unwrap();
+    let window = cx.add_window(|_, _| Empty);
+    let _root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while seen.borrow().len() < 2 && Instant::now() < deadline { cx.run_until_parked(); }
+    let request = server.join().unwrap();
+    assert!(request.contains("authorization: bearer token\r\n") && request.contains("cookie: a=b\r\n"), "{request}");
+    let seen = seen.borrow();
+    assert!(!seen[0].contains("credential"), "{seen:?}");
+    assert!(seen[1].contains("handshake-control"), "handshake-control headers stay refused: {seen:?}");
+}
+
+#[gpui::test]
+fn any_mod_picks_files_and_reads_the_clipboard_image(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let fixture = Fixture::new(r#"
+import { View, div } from "gpui-kit";
+import { clipboardImage, pickFiles } from "herdr";
+import { note } from "fixture";
+export default class extends View {
+  init(_props, cx) {
+    note(String(clipboardImage()));
+    cx.spawn(async () => {
+      note(JSON.stringify(await pickFiles({ multiple: true, images: true })));
+      note(JSON.stringify(await pickFiles()));
+    });
+  }
+  render() { return div(); }
+}"#);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let calls = seen.clone();
+    gpui_shell::policy::set_default(Policy::new()
+        .with_host_module(module(Instance { name: "chat".into(), props: Value::Null }, 0)).unwrap()
+        .with_host_module(HostModule::new("fixture").function("note", move |a| {
+            calls.borrow_mut().push(a.string(0)?.to_owned());
+            Ok(HostValue::Null)
+        })).unwrap());
+    let runtime = ShellRuntime::new_isolated().unwrap();
+    let window = cx.add_window(|_, _| Empty);
+    let _root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
+    cx.run_until_parked();
+    cx.simulate_path_prompt_response(|o| {
+        assert!(o.files && !o.directories && o.multiple);
+        Some(vec!["/a/shot.PNG".into(), "/a/notes.txt".into(), "/a/photo.jpeg".into()])
+    });
+    cx.run_until_parked();
+    cx.simulate_path_prompt_response(|o| {
+        assert!(!o.multiple);
+        None
+    });
+    cx.run_until_parked();
+    assert_eq!(*seen.borrow(), ["null", r#"["/a/shot.PNG","/a/photo.jpeg"]"#, "[]"]);
+}
+
+#[test]
+fn clipboard_images_are_kept_as_png_for_a_day() {
+    let dir = crate::test_tmp().join(format!("herdr-clipboard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let old = dir.join("clipboard-old.png");
+    std::fs::write(&old, b"old").unwrap();
+    std::fs::File::options().write(true).open(&old).unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60)).unwrap();
+    let mut bmp = std::io::Cursor::new(Vec::new());
+    image::RgbImage::new(2, 2).write_to(&mut bmp, image::ImageFormat::Bmp).unwrap();
+    let saved = save_png(&dir, bmp.get_ref()).unwrap();
+    assert!(std::fs::read(&saved).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(!old.exists(), "a day-old paste is cleaned up");
+    assert!(save_png(&dir, b"not an image").is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

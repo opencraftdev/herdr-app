@@ -303,6 +303,9 @@ struct PendingTerminalChange {
 /// The slot of a terminal shown in a pane in place of its own (`<pane>#swap`).
 const SWAP: &str = "#swap";
 
+/// The slot of a mod shown in a pane in place of its terminal (`<pane>#view`).
+const VIEW: &str = "#view";
+
 /// The share of the script VM's heap ceiling past which a mod edit starts a
 /// new VM instead of reloading into the old one (`files_changed`).
 const RESTART_MODS_AT: f64 = 0.75;
@@ -399,6 +402,9 @@ pub struct AppWindow {
     /// Panes showing another terminal for now (pane → address), e.g. a sub-agent
     /// looked at in place of its parent. Not saved; the pane keeps its own.
     swapped: HashMap<String, String>,
+    /// Panes showing a mod in place of their terminal (`pane.view`), which keeps
+    /// running and attached underneath. Not saved, like `swapped`.
+    viewed: HashMap<String, Instance>,
     float_drag: Option<floats::FloatDrag>,
     pane_drag: Option<pane_drag::PaneDrag>,
     pane_grip_hover: Option<String>,
@@ -527,6 +533,7 @@ impl AppWindow {
             agent: None,
             agent_focused: None,
             swapped: HashMap::new(),
+            viewed: HashMap::new(),
             float_drag: None,
             pane_drag: None,
             pane_grip_hover: None,
@@ -1296,6 +1303,9 @@ impl AppWindow {
                 if let Some(a) = self.swapped.get(&n.id) {
                     terms.push((format!("{}{SWAP}", n.id), a.clone()));
                 }
+                if let Some(i) = self.viewed.get(&n.id) {
+                    mods.push((format!("{}{VIEW}", n.id), i.clone()));
+                }
             }
         }
         for o in &self.overlays {
@@ -1350,6 +1360,9 @@ impl AppWindow {
             for n in c.root.walk() {
                 if let Some(Content::Mod { name, props }) = n.content() {
                     out.insert(n.id.clone(), inst(name, props));
+                }
+                if let Some(i) = self.viewed.get(&n.id) {
+                    out.insert(format!("{}{VIEW}", n.id), i.clone());
                 }
                 if let Some((name, props)) = &header
                     && n.is_pane()
@@ -1441,7 +1454,7 @@ impl AppWindow {
         let (terms, _) = self.visible();
         // A swapped-in terminal is drawn instead of its pane's own.
         let covered: HashSet<&str> = terms.iter().filter_map(|(slot, _)| slot.strip_suffix(SWAP)).collect();
-        let mut out: Vec<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str())).map(|(_, a)| a.clone()).collect();
+        let mut out: Vec<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str()) && !self.viewed.contains_key(slot)).map(|(_, a)| a.clone()).collect();
         if self.shows_agent() {
             out.extend(self.shown_agent());
         }
@@ -1475,9 +1488,11 @@ impl AppWindow {
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
         self.swapped.retain(|p, a| model.address_of(p).is_some() && live.contains_key(a));
+        self.viewed.retain(|p, _| model.address_of(p).is_some());
         let (mut terms, mods_visible) = self.visible();
         let covered: HashSet<&str> = terms.iter().filter_map(|(slot, _)| slot.strip_suffix(SWAP)).collect();
-        let mut displayed: HashSet<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str())).map(|(slot, _)| slot.clone()).collect();
+        // A viewed pane's terminal is under its mod: blurred, so the keyboard leaves it.
+        let mut displayed: HashSet<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str()) && !self.viewed.contains_key(slot)).map(|(slot, _)| slot.clone()).collect();
         // Agent blocks reuse their agent's pane view even when its tab isn't shown.
         if self.shows_agent()
             && let Some(addr) = self.shown_agent()
@@ -1687,8 +1702,11 @@ impl AppWindow {
         dialog.or(shown).unwrap_or_else(|| self.focus.clone()).focus(window, cx);
     }
 
-    /// The terminal view a pane shows: the swapped-in one, else its own.
+    /// The terminal view a pane shows: the swapped-in one, else its own; none under a mod.
     fn pane_term(&self, pane: &str) -> Option<&Term> {
+        if self.viewed.contains_key(pane) {
+            return None;
+        }
         self.swapped.get(pane).and_then(|_| self.terms.get(&format!("{pane}{SWAP}"))).or_else(|| self.terms.get(pane))
     }
 
@@ -1863,6 +1881,7 @@ impl AppWindow {
                         continue;
                     }
                     let Some(addr) = p.terminal() else { continue };
+                    let view = self.viewed.get(&p.id).map(|i| i.name.clone());
                     let a = m.agents.get(addr);
                     let title = self.terms.get(&p.id).map(|t| t.view.read(cx).title.clone()).or_else(|| {
                         self.live.get(addr).and_then(|r| r.get("title")).and_then(Value::as_str).map(str::to_owned)
@@ -1871,7 +1890,7 @@ impl AppWindow {
                         "pane": p.id, "terminal": addr, "tab": ctx.id, "title": title.clone().unwrap_or_default(),
                         "cwd": self.cwds.get(addr), "branch": m.folder_info.get(addr).and_then(|f| f.branch.clone()),
                         "status": m.status(addr), "app": a.and_then(|a| a.app.clone()), "program": self.program(addr),
-                        "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id),
+                        "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id), "view": view,
                     }));
                     let Some(status) = m.status(addr) else { continue };
                     agents.push(json!({
@@ -3325,6 +3344,7 @@ impl AppWindow {
                 let pane = Self::owned(a, "pane").or_else(|| self.model.focused_pane());
                 let target = Self::arg(a, "terminal").filter(|t| self.live.contains_key(*t)).map(str::to_owned);
                 if let Some(p) = pane {
+                    self.viewed.remove(&p);
                     match target {
                         // One with a pane of its own is shown there.
                         Some(t) if let Some(own) = self.model.pane_of(&t) => {
@@ -3341,6 +3361,27 @@ impl AppWindow {
                     }
                     self.focused_pane = None;
                 }
+            }
+            "pane.view" => {
+                let Some(p) = Self::owned(a, "pane").or_else(|| self.model.focused_pane()) else { return self.fail("no pane to view") };
+                let Some(terminal) = self.model.address_of(&p) else { return self.fail(format!("no terminal pane {p:?}")) };
+                match Self::owned(a, "mod") {
+                    Some(name) => {
+                        if !self.folders.contains_key(&name) {
+                            return self.fail(format!("no mod {name:?} in mods/"));
+                        }
+                        let mut props = a.get("props").filter(|v| v.is_object()).cloned().unwrap_or_else(|| json!({}));
+                        props["pane"] = json!(p);
+                        props["terminal"] = json!(terminal);
+                        self.swapped.remove(&p);
+                        self.viewed.insert(p, Instance { name, props });
+                    }
+                    None => {
+                        self.viewed.remove(&p);
+                    }
+                }
+                // The keyboard follows: to the window under a mod (a click gives it to the mod), else the terminal.
+                self.focused_pane = None;
             }
             "terminal.search" => {
                 let Some(t) = self.focused_terminal(window, cx) else { return self.fail("no focused terminal to search") };
@@ -4415,6 +4456,7 @@ impl AppWindow {
 
     fn render_block(&self, n: &Node, content: &Content, focused: &HashSet<String>, cx: &mut Context<Self>) -> AnyElement {
         match content {
+            Content::Terminal { .. } if self.viewed.contains_key(&n.id) => self.render_slot(&format!("{}{VIEW}", n.id), cx),
             Content::Terminal { .. } => match self.pane_term(&n.id) {
                 Some(t) => {
                     let id = n.id.clone();
@@ -4475,13 +4517,15 @@ impl AppWindow {
         let in_overlay = slot.starts_with("overlay:") || self.overlays.iter().any(|o| o.layout.as_ref().is_some_and(|l| l.find(slot).is_some()));
         // A mod that is a pane in a tab: a click makes it the focused pane, and the
         // keyboard is its own (an editor, a board), like a terminal's.
-        let in_pane = self.model.tab_of(slot).is_some();
+        // A pane's view mod (`pane.view`) acts as its pane.
+        let pane = slot.strip_suffix(VIEW).unwrap_or(slot);
+        let in_pane = self.model.tab_of(pane).is_some();
         match self.copies.get(slot) {
             Some(Copy { root: Some(root), inst, .. }) => div()
                 .size_full()
                 .key_context(format!("Mod mod = {}", inst.name).as_str())
                 .when(in_pane, |d| {
-                    let id = slot.to_owned();
+                    let id = pane.to_owned();
                     d.on_any_mouse_down(cx.listener(move |this, _, _, cx| {
                         if this.focused_pane.as_deref() != Some(id.as_str()) {
                             this.model.focus_pane(&id);
@@ -4984,7 +5028,7 @@ fn swap_by(args: &Value) -> Result<SwapBy<'_>, String> {
 
 fn needs_model_pane(name: &str, args: &Value) -> bool {
     match name {
-        "pane.split" | "pane.close" | "pane.zoom" | "pane.swap" | "terminal.show" => AppWindow::arg(args, "pane").is_none(),
+        "pane.split" | "pane.close" | "pane.zoom" | "pane.swap" | "pane.view" | "terminal.show" => AppWindow::arg(args, "pane").is_none(),
         "pane.go" => true,
         "terminal.open" | "terminal.keep" => matches!(AppWindow::arg(args, "place"), Some("right" | "down")),
         _ => false,
@@ -5991,11 +6035,11 @@ mod tests {
         let mut layout: crate::layout::Node = serde_json::from_str(include_str!("../defaults/layouts/main.json")).unwrap();
         let context = cx.add_empty_window();
         for (macos, titlebar, width, zoom, expected) in [
-            (true, crate::layout::Titlebar::Layout, 44.0, 1.0, 42.0),
-            (true, crate::layout::Titlebar::Layout, 90.0, 0.75, 42.0),
+            (true, crate::layout::Titlebar::Layout, 44.0, 1.0, 46.0),
+            (true, crate::layout::Titlebar::Layout, 90.0, 0.75, 46.0),
             (true, crate::layout::Titlebar::Layout, 60.0, 1.5, 0.0),
-            (true, crate::layout::Titlebar::Layout, 60.0, 1.0, 42.0),
-            (true, crate::layout::Titlebar::Layout, 76.0, 1.0, 42.0),
+            (true, crate::layout::Titlebar::Layout, 60.0, 1.0, 46.0),
+            (true, crate::layout::Titlebar::Layout, 76.0, 1.0, 46.0),
             (true, crate::layout::Titlebar::Layout, 268.0, 1.0, 0.0),
             (false, crate::layout::Titlebar::Layout, 44.0, 1.0, 0.0),
             (true, crate::layout::Titlebar::System, 44.0, 1.0, 0.0),
@@ -6842,6 +6886,68 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_views_a_pane_in_place_of_its_terminal() {
+        in_own_process("pane_view");
+    }
+
+    #[gpui::test]
+    fn pane_view(cx: &mut gpui::TestAppContext) {
+        use serde_json::json;
+        if !running_alone("pane_view") {
+            return;
+        }
+        cx.update(gpui_base::init);
+        let chat = r#"import { View, div } from "gpui-kit";
+import { panes, props, setShared } from "herdr";
+export default class extends View {
+  init() { setShared("viewed", { ...props(), view: panes().find((p) => p.pane === props().pane)?.view ?? null }); }
+  render() { return div().size_full().child("chat"); }
+}"#;
+        let (view, cx) = open_window(cx, "chat", chat, json!({ "id": "main", "type": "block", "content": { "tab": "active" } }));
+        let viewed = || crate::mods::shared("viewed").unwrap_or_default();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            let mut tab = crate::model::Tab::new("a", "a", "pa", "t1");
+            tab.root.split("pa", super::Axis::Row, crate::model::pane("pb", "t2"), "split".into());
+            this.model.add_space("s1", "one", "", tab);
+            this.model.add_tab("s1", crate::model::Tab::new("b", "b", "pc", "t3"));
+            this.model.select_tab("a");
+            this.model.focus_pane("pa");
+            this.sync(window, cx);
+            assert_eq!(this.run_as("pane.view", json!({ "mod": "nope" }), false, window, cx)["error"], "no mod \"nope\" in mods/");
+            assert_eq!(this.run_as("pane.view", json!({ "pane": "zz", "mod": "chat" }), false, window, cx)["error"], "no terminal pane \"zz\"");
+            assert_eq!(this.run_as("pane.view", json!({ "mod": "chat", "props": { "topic": "x" } }), false, window, cx)["ok"], true);
+            assert!(this.copies["pa#view"].root.is_some(), "{:?}", this.copies["pa#view"].error);
+            assert!(this.pane_term("pa").is_none() && this.terms.contains_key("pa"), "the terminal stays attached under the mod");
+            assert!(!this.visible_addresses().contains(&"t1".to_owned()), "a viewed terminal isn't seen");
+        }));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        let first = viewed();
+        assert_eq!((&first["pane"], &first["terminal"], &first["topic"]), (&json!("pa"), &json!("t1"), &json!("x")), "{first}");
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            // New props are a new copy; it reads its pane's `view` from panes().
+            this.run_as("pane.view", json!({ "pane": "pa", "mod": "chat", "props": { "topic": "y" } }), false, window, cx);
+            this.run_as("tab.select", json!({ "id": "b" }), false, window, cx);
+            assert!(this.copies.contains_key("pa#view"), "a hidden tab keeps its view's copy");
+            this.run_as("tab.select", json!({ "id": "a" }), false, window, cx);
+        }));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        assert_eq!(viewed(), json!({ "pane": "pa", "terminal": "t1", "topic": "y", "view": "chat" }));
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.run_as("pane.view", json!({ "pane": "pa" }), false, window, cx);
+            assert!(!this.copies.contains_key("pa#view") && this.pane_term("pa").is_some(), "no mod: the terminal again");
+            this.run_as("pane.view", json!({ "pane": "pb", "mod": "chat" }), false, window, cx);
+            this.run_as("terminal.show", json!({ "pane": "pb" }), false, window, cx);
+            assert!(!this.copies.contains_key("pb#view"), "terminal.show takes the pane back");
+            this.run_as("pane.view", json!({ "pane": "pb", "mod": "chat" }), false, window, cx);
+            this.model.remove_pane("pb");
+            this.sync(window, cx);
+            assert!(this.viewed.is_empty() && !this.copies.contains_key("pb#view"), "a closed pane drops its view");
+        }));
+    }
+
+    #[test]
     fn the_toast_clock_runs_only_while_a_toast_is_up() {
         in_own_process("toast_clock");
     }
@@ -7335,11 +7441,11 @@ export default class SystemToast extends View {
     #[test]
     fn composition_commands_never_default_to_a_source_pane() {
         use serde_json::json;
-        for name in ["pane.split", "pane.close", "pane.zoom", "pane.go", "pane.swap", "terminal.show"] {
+        for name in ["pane.split", "pane.close", "pane.zoom", "pane.go", "pane.swap", "pane.view", "terminal.show"] {
             assert!(super::needs_model_pane(name, &json!({})), "{name}");
             assert!(super::needs_model_pane(name, &json!({"pane": null})), "{name}");
         }
-        for name in ["pane.split", "pane.close", "pane.zoom", "pane.swap", "terminal.show"] {
+        for name in ["pane.split", "pane.close", "pane.zoom", "pane.swap", "pane.view", "terminal.show"] {
             assert!(!super::needs_model_pane(name, &json!({"pane": "explicit-pane"})), "{name}");
         }
         assert!(super::needs_model_pane("pane.go", &json!({"pane": "explicit-pane"})));

@@ -63,10 +63,10 @@ test("picker reveals keyboard selection in its measured, constrained list", () =
     tree.calls.on_key_down[0]({ key: "up" }, cx);
     tree = view.render();
     const selected = find(tree, machines ? `pk-space-machine-${machines - 1}` : "pk-space-here");
-    expect(selected.calls.top[0]).toBe(height - 32);
+    expect(selected.calls.top[0]).toBe(height - 34);
     expect(selected.calls.bottom[0]).toBe(0);
     const list = find(tree, "pk-list");
-    expect(list.calls.h[0]).toBeLessThanOrEqual(320);
+    expect(list.calls.h[0]).toBeLessThanOrEqual(420);
     list.calls.on_scroll_wheel[0]({ delta: { y: -1000 } }, cx);
     expect(find(view.render(), selected.calls.id[0])).toBeDefined();
     tree.calls.on_key_down[0]({ key: "down" }, cx);

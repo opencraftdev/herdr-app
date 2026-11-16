@@ -71,6 +71,7 @@ function items(p, git) {
       return [
         ["New space", "space.new", {}],
         ["Keybinds", "app.help", {}],
+        ["Theme: OCraft", "app.theme", { name: "ocraft" }],
         ["Theme: graphite", "app.theme", { name: "graphite" }],
         ["Theme: ink", "app.theme", { name: "ink" }],
         ["Theme: moss", "app.theme", { name: "moss" }],
@@ -124,9 +125,9 @@ export default class Menu extends View {
       .track_focus(this.handle)
       .w_full()
       .min_h(0)
-      .p(5)
+      .p(4)
       .bg(t.popover)
-      .text_size(12.8)
+      .text_size(13)
       .on_key_down((e, cx) => {
         if (e.key === "down") this.at = (this.at + 1) % list.length;
         else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
@@ -141,19 +142,19 @@ export default class Menu extends View {
             .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
             .child(h_flex()
             .id(`mi-${i}`)
-            .h(31)
+            .h(34)
             .px(8)
-            .gap(9)
-            .rounded(7)
+            .gap(10)
+            .rounded(8)
             .items_center()
             .justify_between()
             .text_color(t.foreground)
-            .when(i === this.at, (el) => el.bg(t.selected))
+            .when(i === this.at, (el) => el.bg(t.hover))
             .hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => this.choose(i, cx))
-            .child(svg(menuIcon(it[1], it[2])).size(14).flex_none().text_color(t.muted))
+            .child(svg(menuIcon(it[1], it[2])).size(16).flex_none().text_color(t.dim))
             .child(div().flex_1().child(it[0]))
-            .child(div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
+            .child(div().text_size(12).text_color(t.dim).child(shortcut(it[1], it[2])))),
         ),
       );
   }

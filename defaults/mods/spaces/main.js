@@ -25,7 +25,9 @@ function place(s, ps) {
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
-const rowHeight = ({ tree }) => (tree ? 28 : 30);
+const ROW = 32;
+// A row's first and last cells: the folder (or tree line) and the status.
+const CELL = 34;
 const RAIL_CELL = 32;
 // A space's name and its git tail never shrink below this, so a short one ("api")
 // stays readable instead of turning into an ellipsis next to a long branch.
@@ -51,7 +53,17 @@ async function both(a, b) {
 
 // What a stored color name looks like on an avatar (the same in every mod
 // that draws space avatars): one strong color per hue, light and dark alike.
-const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
+const MARK = { ansi6: "#81b0fa", ansi3: "#e5b567", ansi4: "#40c977", ansi5: "#ad7bf9", ansi2: "#fc8d8b", ansi1: "#9fb4c2" };
+// Branch ahead / behind, as a diff's added and removed lines.
+const AHEAD = "#3fb950", BEHIND = "#f85149";
+
+// A status in a row's last cell: working breathes, blocked asks, done is a dot, idle shows nothing.
+export function marker(t, status) {
+  if (status === "working") return div().size(8).rounded(4).bg(t.working).loop("opacity", { from: 1, to: 0.5, period: 2000 });
+  if (status === "blocked") return div().text_size(13).font_bold().text_color(t.blocked).child("?");
+  if (status === "done") return div().size(8).rounded(4).bg(t.done);
+  return null;
+}
 
 // A space speaks up only when something in it needs you.
 export function glyph(status) {
@@ -366,7 +378,7 @@ export default class Spaces extends View {
       const folded = this.folded.has(m);
       const icon = svg(`mods/workspace-chrome/${m ? "server" : "monitor"}.svg`).size(13).flex_none();
       const badge = div().absolute().right(-3).bottom(-2).size(6).rounded(3).border_1().border_color(t.chrome).bg(connected ? t.ansi2 : t.dim);
-      const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().px(collapsed ? 0 : 8).gap(7).items_center().text_size(11).text_color(t.dim)
+      const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().mt(collapsed ? 0 : 8).px(collapsed ? 0 : 8).gap(7).items_center().text_size(12).font_medium().text_color(t.dim)
         .when(collapsed, el => el.mt(4).w(RAIL_CELL).justify_center().rounded(6).tooltip(login ? `${m} needs a login: run ${login}. Click for Copy.` : m ? `${m} · ${connected ? "connected" : (machine?.state ?? "asleep").replace(/_/g, " ")}` : "This computer"))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .on_click((_e, cx) => {
@@ -434,11 +446,11 @@ export default class Spaces extends View {
       .gap(5)
       .justify_end()
       .items_center()
-      .text_size(11.5)
+      .text_size(12)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(AHEAD).child(`\u2191${g.ahead}`)))
+      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(BEHIND).child(`\u2193${g.behind}`)));
   }
 
   row({ w, i, g, tree }, t) {
@@ -450,8 +462,7 @@ export default class Spaces extends View {
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
-      .px(8)
-      .h(rowHeight({ tree }))
+      .h(ROW)
       .flex_none()
       .justify_center()
       .rounded(8)
@@ -489,12 +500,17 @@ export default class Spaces extends View {
       .on_mouse_down("right", () => this.menu(w))
       .child(
         h_flex()
-          .gap(9)
+          .h_full()
+          .gap(6)
           .items_center()
-          .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.dim)))
-          .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
+          // A worktree: a tee or an elbow in the indent cell, under its repo's folder.
+          .when(Boolean(tree), el => el.child(div().relative().w(CELL).h_full().flex_none()
+            .child(div().absolute().left(17).top(0).w(1).bg(t.input).when(tree === "└─", l => l.h(ROW / 2)).when(tree !== "└─", l => l.h(ROW)))
+            .child(div().absolute().left(17).top(ROW / 2).w(10).h(1).bg(t.input))))
+          .when(!tree, el => el.child(h_flex().w(CELL).flex_none().justify_center().child(svg("mods/workspace-chrome/folder.svg").size(18).text_color(fill))))
+          .child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(on ? t.solid : t.foreground).child(w.name))
+          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
+          .child(h_flex().w(24).flex_none().justify_center().children([marker(t, w.status)].filter(Boolean))),
       );
   }
 
@@ -537,16 +553,23 @@ export default class Spaces extends View {
       this.revealedAt = this.activeAt;
       if (this.activeAt >= 0) this.scroll.scroll_to_item(this.activeAt);
     }
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
-        .when(collapsed, el => el.pl(0).pr(0).justify_center())
-        .when(!collapsed, el => el.child("Spaces"))
+    // A plain row: an icon in the leading cell, then its label.
+    const nav = (id, icon, label, action) => h_flex().id(id).h(ROW).flex_none().rounded(8).gap(6).items_center()
+      .text_color(t.foreground).cursor_pointer().hover(s => s.bg(t.hover)).on_click(action)
+      .child(h_flex().w(CELL).flex_none().justify_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(16).text_color(t.dim)))
+      .child(div().truncate().child(label));
+    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(14)
+      .when(collapsed, el => el.child(h_flex().h(31).items_center().justify_center().text_color(t.dim)
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
-      .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always").track_scroll(this.scroll)
+          .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14)))))
+      .when(!collapsed, el => el.child(v_flex().flex_none().px(12).pt(4).pb(8)
+        .child(nav("space-new", "plus", "New", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
+        .child(nav("space-search", "search", "Search", () => run("mod.open", { name: "picker" })))))
+      .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 12).pb(14).overflow_y_scrollbar().mode("always").track_scroll(this.scroll)
         // A block above (another mod's) growing, or the window resizing, shrinks this list and can push the active space out.
         .on_size_change((_size, cx) => { if (this.activeAt >= 0) { this.scroll.scroll_to_item(this.activeAt); cx.notify(); } })
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
-        .children(list));
+        .children(list)
+        .when(!collapsed, el => el.child(nav("space-new-row", "plus", "New workspace", () => run("space.new")).text_color(t.muted))));
   }
 }

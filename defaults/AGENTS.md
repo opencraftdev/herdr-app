@@ -173,11 +173,11 @@ Each file is one whole window. `layout.switch` (`ctrl-shift-l`) cycles
 through them, `layout.switch {name}` picks one; `shared("layout")` is the
 shown one's name. Herdr ships `main` ("Herdr": spaces by machine and the
 agents list on the left, `workspace-chrome`; tabs as pills with a + menu
-that starts a terminal or any installed agent, `new-menu`; panes as cards
-with a header; Files and Changes panels on the right, `files` and
+that starts a terminal or any installed agent, `new-menu`; panes split
+flush, square and with a header; Files and Changes panels on the right, `files` and
 `changes`, opened from the tab bar and remembered per space (which ones:
 shared `"workspace.panels"`, set by the welcome); a status bar,
-`workspace-status`), and as examples `terminals` ("Terminals": tabs in
+`workspace-status`, hidden until shown), and as examples `terminals` ("Terminals": tabs in
 the title bar, panes as cards, a space picker) and `win98`
 ("Herdr 98": a whole desktop in one mod, `win98`). Add a layout by
 writing a new file. The Files panel supports Windows folder paths with spaces,
@@ -326,14 +326,15 @@ layout's look and a block can differ:
   `"theme": { "light": "paper", "dark": "graphite" }` follows the system's
   light or dark mode (or the person's `appearance`). `app.theme {name}`
   sets the half of the name's lightness. A layout without a theme shows
-  settings.json's theme, else graphite or paper. `colors` overrides any theme color by name (see
+  settings.json's theme, else `ocraft` (dark, in either appearance). `colors` overrides any theme color by name (see
   `theme()` below), for terminals and panels alike: overrides apply in
   both appearances, so name theme colors (`chrome`, `canvas`) rather than
   writing hex when a layout should work light and dark.
 - `themes/<name>.json`: `{ "background", "foreground", "selection",
   "cursor"?, "ansi": [16 colors], "colors"?: {...} }`, all `#rrggbb`; panel
   colors are derived from these, `colors` overrides them. Herdr ships
-  `atom-one-dark`. The original unedited Atom One Dark and Win98 theme files
+  `ocraft` (the default: a neutral dark grey with a blue accent, its panel
+  colors all set in `colors`) and `atom-one-dark`. The original unedited Atom One Dark and Win98 theme files
   are upgraded to readable terminal colors; edited theme files are kept.
   A theme named like a layout (`themes/win98.json`) is
   that layout's own: Settings offers it only there.
@@ -346,7 +347,8 @@ layout's look and a block can differ:
   to 0.1..5), including mouse reports to programs. Small moves accumulate.
 - `font` / `font_size`: the terminals' (px at zoom 1); `ui_font`: the mods'
   (their text sizes are their own, in px, and follow zoom). Optional: without
-  them a layout uses settings.json's, else Herdr's (JetBrains Mono 14, Geist).
+  them a layout uses settings.json's, else Herdr's (JetBrains Mono 13; the
+  system font on macOS, Geist elsewhere).
   Herdr (main) leaves these unset; Terminals sets text size 15, and Herdr 98
   brings its own fonts.
   JetBrains Mono, Geist Mono and Geist ship with Herdr; any installed font
@@ -355,8 +357,8 @@ layout's look and a block can differ:
   folder (or the home's `fonts/`) load at start and on the next look change,
   so a layout and its mod folder travel together (Herdr 98's do: its pixel
   fonts are in `mods/win98/fonts/`).
-- `font_weight` (100..900): the terminals' text weight. Default 500
-  (Medium); 400 is Regular, 300 Light, using the family's nearest face.
+- `font_weight` (100..900): the terminals' text weight. Default 400
+  (Regular); 500 is Medium, 300 Light, using the family's nearest face.
   Bold text stays at 700.
 - `pane_scrollbars` in settings.json (default `true`): show terminal scrollback
   with a slim thumb and track. Drag the thumb or click the track to jump there.
@@ -394,8 +396,7 @@ The tab block says how each pane of the shown tab is wrapped:
   because the numbers changed. `position`: `top` or
   `bottom`; `reveal: "hover"` shows it only while the pointer is on the pane,
   drawn over the terminal so the terminal never resizes. The shipped `pane`
-  mod keeps its divider on the terminal-facing edge and reads the frame
-  position from `layout()`.
+  mod draws no divider: the header shares the terminal's background.
 - `lone: true` frames a tab's only pane too (default: only when split).
 - Each layout has its own, so one can stay bare while another makes
   every pane a card.
@@ -598,7 +599,10 @@ The main ones:
   pane ends with it, keeping its exit code; that shell PATH needs sh, bash, zsh, dash, ksh or
   fish: with other shells (nushell) and on Windows `argv` runs directly), `pane.close {pane?}`,
   `pane.zoom {pane?}`, `pane.focus {pane | terminal}`, `pane.go {direction}`,
-  `pane.swap {pane?, direction | target}`.
+  `pane.swap {pane?, direction | target}`,
+  `pane.view {pane?, mod?, props?}` (a mod drawn in place of the pane's terminal, which keeps
+  running and attached; the mod's props also get `pane` and `terminal`; no `mod`: the terminal
+  again; `panes()[i].view` names it; not saved, like `terminal.show`).
   `pane.zoom` also makes the pane its tab's focused one (the tab isn't
   selected); on the zoomed pane it unzooms and focus stays.
   `pane.go` prefers the most recently focused pane along the nearest edge in that
@@ -611,7 +615,7 @@ The main ones:
   A swap moves panes, not focus: the focused pane stays focused in its new place.
   `pane.focus {terminal}` prefers the first visible layout terminal block showing that
   address, then its model pane. Clicking a terminal block focuses it too.
-  While a layout terminal block is focused, implicit split/close/zoom/go/swap and
+  While a layout terminal block is focused, implicit split/close/zoom/go/swap/view and
   `terminal.show` fail, as do `terminal.open`/`terminal.keep` with place right/down.
   They never act on the terminal's source pane. An explicit `pane` still targets that
   model pane; composition edits belong to the mod (edit its layout instead).
@@ -1116,6 +1120,9 @@ All of it is in `herdr.d.ts`. In short:
   rejects if the check fails (failed checks are not cached); start one with `argv: agent.run`.
   `pickFolder({ prompt })`: the system's folder picker (here only),
   resolves with the folder or null.
+  `pickFiles({ multiple, images, prompt })`: the file picker (here only),
+  resolves with absolute paths (`[]` when cancelled; `images: true` keeps image files only).
+  `clipboardImage()`: the clipboard's image saved as a PNG (its path, kept a day), or null.
 - Files: `readTextFile(path, { on })` (here, or on that machine),
   `writeTextFile(path, text, expected)` (here only), and
   `watchFolder(dir)` (here only; poll a remote space's folder): resolves with the changed paths the next time anything
@@ -1142,7 +1149,8 @@ All of it is in `herdr.d.ts`. In short:
   sees it; setting re-renders all), `nextCommand()` (key commands for this
   mod: `cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); …; cx.notify(); } })`).
 
-Mods are trusted code: commands and network access (including `fetch`) are unrestricted.
+Mods are trusted code: commands and network access (including `fetch`) are unrestricted;
+`WebSocket.connect(url, { headers })` (from `"websocket"`) may send `Authorization` and `Cookie`.
 Other built-ins: `localStorage` (per mod copy), `console.log`, `fetch`,
 `import * as fs from "fs/promises"` (read in home, write under `~/.config/herdr-app`).
 

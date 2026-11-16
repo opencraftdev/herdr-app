@@ -3908,7 +3908,8 @@ declare module "websocket" {
     close(): Promise<void>;
   }
   export interface WebSocketConnectOptions {
-    /** Additional protocol headers. Credential and WebSocket control headers are refused. */
+    /** Additional protocol headers. WebSocket control headers are refused; credential headers
+     *  (Authorization, Cookie) only with an unrestricted network grant. */
     headers?: Readonly<Record<string, string>>;
   }
   export interface WebSocketType {

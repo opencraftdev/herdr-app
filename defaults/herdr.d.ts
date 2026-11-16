@@ -41,6 +41,16 @@ export function knownAgents(options?: { on?: string | null }): Promise<(Program 
  *  when the person cancels. `prompt`: the confirm button's text (default "Open"). */
 export function pickFolder(options?: { prompt?: string }): Promise<string | null>;
 
+/** Opens the system's file picker (this machine). Resolves with the chosen files' absolute
+ *  paths, [] when the person cancels. `multiple`: more than one (default false); `images`: only
+ *  image files are kept (by extension); `prompt`: the confirm button's text (default "Open"). */
+export function pickFiles(options?: { multiple?: boolean; images?: boolean; prompt?: string }): Promise<string[]>;
+
+/** The clipboard's image saved as a PNG file (absolute path, under
+ *  ~/.config/herdr-app/data/<mod>/clipboard, removed after a day); null when the clipboard holds
+ *  no image. Throws if the image can't be read. */
+export function clipboardImage(): string | null;
+
 /** Plays "done" or "blocked" (the attention sounds, or the files settings.json names), or an MP3
  *  file (absolute, or relative to ~/.config/herdr-app). */
 export function playSound(sound: string): null;
@@ -62,7 +72,9 @@ export function playSound(sound: string): null;
  * space, selected tab and keyboard focus; background tabs are appended in creation order.
  * With no space shown, a new space is shown even with focus: false.
  * Panes: pane.split {direction: "right" | "down", pane?}, pane.close {pane?}, pane.zoom {pane?},
- *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
+ *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target},
+ *   pane.view {pane?, mod?, props?} (a mod in place of the pane's terminal, which keeps running; the mod's
+ *   props get pane and terminal; no mod: the terminal again; not saved).
  *   Pane menus get target { pane, terminal }.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
@@ -226,6 +238,8 @@ export interface PaneInfo {
   movable: boolean;
   /** History scroll for a terminal pane's attached view; null for mod panes / alt-screen. Live. */
   scroll?: PaneScroll | null;
+  /** The mod shown in place of the terminal (`pane.view`), else null; absent on mod panes. */
+  view?: string | null;
 }
 
 /** Every pane in every tab. A pane header mod finds its own with

@@ -79,9 +79,10 @@ const PAPER: Palette = Palette {
 
 pub const PRESETS: &[&str] = &["graphite", "ink", "moss", "paper"];
 
-/// The theme a layout without one shows, by appearance.
-pub const DEFAULT_DARK: &str = "graphite";
-pub const DEFAULT_LIGHT: &str = "paper";
+/// The theme a layout without one shows, by appearance. OCraft is dark only:
+/// it shows in light mode too, until the person picks a light theme.
+pub const DEFAULT_DARK: &str = "ocraft";
+pub const DEFAULT_LIGHT: &str = "ocraft";
 
 fn preset(name: &str) -> Option<&'static Palette> {
     match name {
@@ -96,9 +97,10 @@ fn preset(name: &str) -> Option<&'static Palette> {
 /// The shipped theme files (defaults/themes), written to `themes/` when missing.
 const THEMES: &[(&str, &str)] = &[
     ("atom-one-dark", include_str!("../defaults/themes/atom-one-dark.json")),
+    ("ocraft", include_str!("../defaults/themes/ocraft.json")),
     ("win98", include_str!("../defaults/themes/win98.json")),
 ];
-pub const SHIPPED_THEMES: &[&str] = &["atom-one-dark", "win98"];
+pub const SHIPPED_THEMES: &[&str] = &["atom-one-dark", "ocraft", "win98"];
 
 /// `themes/<name>.json`: a palette, plus `colors` overrides like settings.json's.
 #[derive(Deserialize)]
@@ -182,8 +184,13 @@ fn palette(name: &str) -> Result<(Palette, BTreeMap<String, String>), String> {
         return Ok((p.clone(), BTreeMap::new()));
     }
     let path = theme_path(name);
+    // A shipped theme is always there, even before its file is written (or after it's
+    // deleted): the default, ocraft, is one.
+    let shipped = || THEMES.iter().find(|(n, _)| *n == name).map(|(_, t)| t.to_string());
     let text = std::fs::read_to_string(&path)
-        .map_err(|_| format!("theme {name:?} is not one of {} and there is no themes/{name}.json", PRESETS.join(", ")))?;
+        .ok()
+        .or_else(shipped)
+        .ok_or_else(|| format!("theme {name:?} is not one of {} and there is no themes/{name}.json", PRESETS.join(", ")))?;
     parse_theme_file(name, &text)
 }
 
@@ -546,13 +553,13 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             font_family: DEFAULT_FONT.into(),
-            font_size: 14.0,
-            font_weight: 500,
+            font_size: 13.0,
+            font_weight: 400,
             font_ligatures: false,
             terminal_line_height: 1.0,
             terminal_cell_width: 1.0,
             terminal_scroll_speed: 1.0,
-            ui_font_family: "Geist".into(),
+            ui_font_family: DEFAULT_UI_FONT.into(),
             ui_font_size: 13.0,
             zoom: 1.0,
             theme: DEFAULT_DARK.into(),
@@ -899,6 +906,9 @@ pub const SYMBOLS_FONT: &str = "Symbols Nerd Font";
 
 /// Terminals' font unless a layout or settings.json picks another.
 pub const DEFAULT_FONT: &str = "JetBrains Mono";
+/// The panels' font: the system's on macOS (SF Pro), where it is always there;
+/// elsewhere the bundled Geist, so every machine draws the same.
+pub const DEFAULT_UI_FONT: &str = if cfg!(target_os = "macos") { ".SystemUIFont" } else { "Geist" };
 
 #[cfg(test)]
 mod tests {
@@ -1007,9 +1017,9 @@ mod tests {
     }
 
     #[test]
-    fn font_weight_defaults_to_medium_and_validates_the_range() {
+    fn font_weight_defaults_to_regular_and_validates_the_range() {
         let default: Person = serde_json::from_str("{}").unwrap();
-        assert_eq!(Settings::compose(&default, &crate::layout::Look::default(), true).font_weight, 500);
+        assert_eq!(Settings::compose(&default, &crate::layout::Look::default(), true).font_weight, 400);
         assert!(serde_json::to_value(&default).unwrap().get("font_weight").is_none());
         for weight in [100, 300, 400, 900, 50, 950] {
             let person: Person = serde_json::from_value(serde_json::json!({"font_weight": weight})).unwrap();
@@ -1061,8 +1071,10 @@ mod tests {
         let person = Person { font_size: Some(19.0), theme: Some(ThemeChoice::One("moss".into())), ..Person::default() };
         let main: Node = serde_json::from_str(include_str!("../defaults/layouts/main.json")).unwrap();
         assert!(main.look.theme.is_none() && main.look.colors.is_none() && main.look.font.is_none() && main.look.font_size.is_none() && main.look.ui_font.is_none());
-        assert_eq!(Settings::compose(&Person::default(), &main.look, true).font_size, 14.0);
-        assert_eq!(main.look.terminal_padding, Some([14.0, 12.0]));
+        let fresh = Settings::compose(&Person::default(), &main.look, true);
+        assert_eq!((fresh.font_size, fresh.theme.as_str()), (13.0, "ocraft"));
+        assert_eq!(Settings::compose(&Person::default(), &main.look, false).theme, "ocraft");
+        assert_eq!(main.look.terminal_padding, Some([8.0, 8.0]));
         let terminals: Node = serde_json::from_str(include_str!("../defaults/layouts/terminals.json")).unwrap();
         assert_eq!(Settings::compose(&person, &terminals.look, true).font_size, 15.0);
         let main_settings = Settings::compose(&person, &main.look, true);

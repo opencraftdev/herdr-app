@@ -24,7 +24,8 @@ const APPEARANCES = [
 
 // What the app uses when settings.json names no font (settings.rs).
 const DEFAULT_FONT = "JetBrains Mono";
-const DEFAULT_UI_FONT = "Geist";
+// The app's own panel font: the system's on macOS, else the bundled Geist.
+const defaultUiFont = () => (window()?.platform === "macos" ? ".SystemUIFont" : "Geist");
 
 export default class Settings extends View {
   init(_props, cx) {
@@ -544,7 +545,7 @@ export default class Settings extends View {
         this.row(
           t,
           "Terminal font weight",
-          own("font_weight", s.font_weight, 500) ? "This layout sets its own; yours shows in the others." : "Bold text stays at 700.",
+          own("font_weight", s.font_weight, 400) ? "This layout sets its own; yours shows in the others." : "Bold text stays at 700.",
           this.stepper(t, "st-font_weight", `${s.font_weight}`, (_e, cx) => step("font_weight", s.font_weight, -100, 100, 900, cx), (_e, cx) => step("font_weight", s.font_weight, 100, 100, 900, cx)),
         ),
       )
@@ -560,7 +561,7 @@ export default class Settings extends View {
           this.stepper(t, `st-${key}`, `${Math.round(s[key] * 100)}%`, by(-step), by(step)),
         );
       }))
-      .child(fontRow("ui_font", null, "Interface font", s.ui_font_family, DEFAULT_UI_FONT));
+      .child(fontRow("ui_font", null, "Interface font", s.ui_font_family, defaultUiFont()));
   }
 
   keyboard(t) {
