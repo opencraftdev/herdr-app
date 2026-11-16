@@ -7,7 +7,7 @@ async function harness(mod: string, values: Record<string, string>) {
   const name = { agents: "Agents", spaces: "Spaces", tabs: "Tabs" }[mod]!;
   const data = new Map(Object.entries(values));
   const globals = {
-    View: class {}, props: () => ({}), spaces: () => [], ScrollHandle: { new: () => ({}) },
+    View: class {}, props: () => ({}), spaces: () => [], ScrollHandle: { new: () => ({}) }, checking: () => true,
     localStorage: { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value), removeItem: (key: string) => data.delete(key) },
   };
   const Mod = new Function(...Object.keys(globals), `${source}; return ${name};`)(...Object.values(globals));
