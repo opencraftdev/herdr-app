@@ -685,31 +685,18 @@ fn confirm_dialog_background_follows_the_frame_corners(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn pane_header_divider_faces_the_terminal(cx: &mut TestAppContext) {
+fn pane_header_has_no_divider(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
-    for (position, reveal) in [("bottom", "always"), ("top", "always"), ("", "always"), ("bottom", "hover"), ("top", "hover")] {
+    for position in ["bottom", "top"] {
         let mut values = fixture(true, props(), updates("current", "current"));
         values.insert("layout".into(), json!({
-            "id": "root", "type": "column", "children": [
-                {"id": "hidden", "type": "block", "hidden": true,
-                 "content": {"tab": "active", "pane": {"header": {"position": "bottom"}}}},
-                {"id": "stack", "type": "stack", "active": "shown", "children": [
-                    {"id": "inactive", "type": "block",
-                     "content": {"tab": "active", "pane": {"header": {"position": "bottom"}}}},
-                    {"id": "shown", "type": "block",
-                     "content": {"tab": "active", "pane": {"header": {"position": position, "reveal": reveal}}}}
-                ]}
-            ]
+            "id": "root", "type": "block",
+            "content": {"tab": "active", "pane": {"header": {"position": position}}}
         }));
-        if position.is_empty() {
-            values.get_mut("layout").unwrap()["children"][1]["children"][1]["content"]["pane"]["header"].as_object_mut().unwrap().remove("position");
-        }
         let tree = describe_with_values(cx, &staged, "mods/pane", values, None).unwrap();
         let head = tree.lines().find(|l| l.contains("pane-head-")).unwrap();
-        let (edge, outside) = if position == "bottom" { ("t", "b") } else { ("b", "t") };
-        assert!(head.contains(&format!(".border_{edge}[Number(1.0)]")), "{position}: {head}");
-        assert!(!head.contains(&format!(".border_{outside}[")), "{position}: {head}");
+        assert!(!head.contains(".border_t[") && !head.contains(".border_b["), "{position}: {head}");
     }
 }
 
@@ -781,8 +768,8 @@ fn long_space_names_use_the_sidebar_width(cx: &mut TestAppContext) {
     let remote = lines.iter().position(|l| l.contains("text \"Remote\"")).unwrap();
     let empty = lines[remote + 1..].iter().find(|l| l.contains(".justify_end")).unwrap();
     assert!(empty.contains(".min_w[Number(0.0)]"), "an empty git tail must not take room from the name: {empty}");
-    let icon = lines.iter().find(|l| l.contains("branch.svg")).expect("the worktree space is nested");
-    assert!(icon.contains(".flex_none"), "a worktree's icon keeps its size while the name gives way: {icon}");
+    let indent = lines.iter().find(|l| l.contains(".relative") && l.contains(".w[Number(34.0)]")).expect("the worktree space is nested under a tree line");
+    assert!(indent.contains(".flex_none"), "a worktree's tree line keeps its size while the name gives way: {indent}");
 }
 
 #[gpui::test]
@@ -1216,13 +1203,13 @@ fn picker_scrolls_the_selection_into_view(cx: &mut TestAppContext) {
     values.insert("spaces".into(), json!([
         {"id":"s1","index":1,"name":"Local","folder":"/fixture/project","machine":null,"branch":"main","active":true,"status":"working","tabs":tabs}
     ]));
-    // Selecting the last row (with the arrows) must scroll it into the visible 320px.
+    // Selecting the last row (with the arrows) must scroll it into the visible 420px.
     let tree = describe_with_values(cx, &staged, "mods/picker", values, Some("this.at = 999; cx.notify();")).unwrap();
     let top = tree.lines()
         .find(|l| l.contains("pk-space-here"))
         .unwrap_or_else(|| panic!("selected row missing: {tree}"));
     let px: f64 = top.split(".top[Number(").nth(1).unwrap_or_else(|| panic!("selected row must be placed inside the scrolled list: {tree}")).split(")").next().unwrap().parse().unwrap();
-    assert!(px <= 320.0 - 32.0, "selected row at {px}px is below the visible list: {tree}");
+    assert!(px <= 420.0 - 34.0, "selected row at {px}px is below the visible list: {tree}");
 }
 
 #[gpui::test]
