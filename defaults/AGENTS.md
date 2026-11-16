@@ -397,6 +397,11 @@ The tab block says how each pane of the shown tab is wrapped:
   `bottom`; `reveal: "hover"` shows it only while the pointer is on the pane,
   drawn over the terminal so the terminal never resizes. The shipped `pane`
   mod draws no divider: the header shares the terminal's background.
+  On an agent pane it also shows a Chat | Terminal switch when the
+  `ovis-chat` mod is installed and an Ovis server on herdr-core answers at
+  `shared("ovis.server")` (default `http://127.0.0.1:7318`) and knows that
+  pane: Chat runs `pane.view {pane, mod: "ovis-chat", props: {server, paneId}}`,
+  Terminal runs `pane.view {pane}`.
 - `lone: true` frames a tab's only pane too (default: only when split).
 - Each layout has its own, so one can stay bare while another makes
   every pane a card.
