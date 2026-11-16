@@ -57,10 +57,14 @@ async function ovisPanes(server) {
   return probe.answer;
 }
 
-/** The Ovis pane for a herdr-app pane: on herdr-core its pane_id is the layout node id; a terminal no tab places goes by terminal. */
+/**
+ * The Ovis pane for a herdr-app pane, when Ovis sees an agent in it: on herdr-core its pane_id is the
+ * layout node id; a terminal no tab places goes by terminal. Ovis decides what is an agent (from the
+ * pane's processes): an agent that reports no status to herdr (Claude Code without its hook) still counts.
+ */
 export function ovisPaneId(ovis, pane, terminal) {
   const found = ovis?.find((o) => o.pane_id === pane) ?? ovis?.find((o) => terminal && o.terminal_id === terminal);
-  return found?.pane_id ?? null;
+  return found?.agent ? found.pane_id : null;
 }
 
 export default class Pane extends View {
@@ -78,9 +82,9 @@ export default class Pane extends View {
 
   check(cx) {
     const p = this.me();
-    // only agents on this Mac: a remote pane (machine/…) is another core's
-    const agent = p && p.terminal && !p.pane.includes("/") && (p.status || p.program?.agent || p.view === CHAT);
-    if (!agent) {
+    // only panes on this Mac: a remote pane (machine/…) is another core's; Ovis tells which hold an agent
+    const local = p && p.terminal && !p.pane.includes("/");
+    if (!local) {
       if (this.chatPane !== null) { this.chatPane = null; cx.notify(); }
       return;
     }
@@ -108,38 +112,33 @@ export default class Pane extends View {
       .child(svg(`mods/pane/${icon}.svg`).size(14));
   }
 
-  segment(t, id, label, active, args) {
-    return div()
-      .id(id)
-      .px(8)
-      .h(20)
-      .flex()
-      .items_center()
-      .rounded(5)
-      .text_size(11)
-      .when(active, (el) => el.bg(t.hover).text_color(t.foreground))
-      .when(!active, (el) => el.text_color(t.dim).hover((s) => s.text_color(t.foreground)))
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        if (!active) run("pane.view", args);
-      })
-      .child(label);
-  }
-
-  // Chat | Terminal, shown while the chat can open (and always while it is open, so the way back stays)
+  // Chat | Terminal as two icons beside split, zoom and close: chat shows the conversation, terminal goes
+  // back. Shown while the chat can open (and always while it is open, so the way back stays).
   switcher(t, p) {
     const chat = p.view === CHAT;
     if (!chat && !this.chatPane) return null;
     const pane = p.pane;
+    const toggle = (id, icon, active, tip, args) => div()
+      .id(id)
+      .size(28)
+      .flex_none()
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded(8)
+      .tooltip(tip)
+      .when(active, (el) => el.bg(t.hover).text_color(t.foreground))
+      .when(!active, (el) => el.text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (!active) run("pane.view", args);
+      })
+      .child(svg(`mods/pane/${icon}.svg`).size(14));
     return h_flex()
       .flex_none()
-      .p(2)
       .gap(2)
-      .rounded(7)
-      .border_1()
-      .border_color(t.border)
-      .child(this.segment(t, `ph-chat-${pane}`, "Chat", chat, { pane, mod: CHAT, props: { server: ovisServer(), paneId: this.chatPane ?? pane } }))
-      .child(this.segment(t, `ph-term-${pane}`, "Terminal", !chat, { pane }));
+      .child(toggle(`ph-chat-${pane}`, "chat", chat, "Chat", { pane, mod: CHAT, props: { server: ovisServer(), paneId: this.chatPane ?? pane } }))
+      .child(toggle(`ph-term-${pane}`, "terminal", !chat, "Terminal", { pane }));
   }
 
   render(cx) {
@@ -162,8 +161,8 @@ export default class Pane extends View {
       .on_click(() => run("pane.focus", { pane }))
       .child(div().flex_none().truncate().max_w(260).text_color(t.foreground).child(name))
       .child(div().flex_1().truncate().text_color(p.focused ? t.accent : t.dim).child(folder(p.cwd)))
-      .when(Boolean(switcher), el => el.child(switcher))
       .when(Boolean(mark), el => el.child(h_flex().w(20).flex_none().justify_center().child(mark)))
+      .when(Boolean(switcher), el => el.child(switcher))
       .when(this.hovered, el => el
         .child(this.button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))
         .child(this.button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))

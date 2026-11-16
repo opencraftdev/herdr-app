@@ -48,11 +48,13 @@ beforeEach(() => {
 });
 
 test("the Ovis pane is the herdr-app pane (its layout node id), else the one showing that terminal", () => {
-  const ovis = [{ pane_id: "p1", terminal_id: "t1" }, { pane_id: "hc:loose:t9", terminal_id: "t9" }];
+  const ovis = [{ pane_id: "p1", terminal_id: "t1", agent: "claude-code" }, { pane_id: "hc:loose:t9", terminal_id: "t9", agent: "codex" }, { pane_id: "p2", terminal_id: "t2", agent: null }];
   expect(ovisPaneId(ovis, "p1", "t1")).toBe("p1");
   expect(ovisPaneId(ovis, "p7", "t9")).toBe("hc:loose:t9");
   expect(ovisPaneId(ovis, "p7", "t8")).toBeNull();
   expect(ovisPaneId(null, "p1", "t1")).toBeNull();
+  // a plain shell: Ovis sees no agent there, so no switch (herdr-app's own agent flag is not asked)
+  expect(ovisPaneId(ovis, "p2", "t2")).toBeNull();
 });
 
 test("no switch until the Ovis server knows the pane", () => {
