@@ -72,7 +72,9 @@ export function playSound(sound: string): null;
  * space, selected tab and keyboard focus; background tabs are appended in creation order.
  * With no space shown, a new space is shown even with focus: false.
  * Panes: pane.split {direction: "right" | "down", pane?}, pane.close {pane?}, pane.zoom {pane?},
- *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
+ *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target},
+ *   pane.view {pane?, mod?, props?} (a mod in place of the pane's terminal, which keeps running; the mod's
+ *   props get pane and terminal; no mod: the terminal again; not saved).
  *   Pane menus get target { pane, terminal }.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
@@ -236,6 +238,8 @@ export interface PaneInfo {
   movable: boolean;
   /** History scroll for a terminal pane's attached view; null for mod panes / alt-screen. Live. */
   scroll?: PaneScroll | null;
+  /** The mod shown in place of the terminal (`pane.view`), else null; absent on mod panes. */
+  view?: string | null;
 }
 
 /** Every pane in every tab. A pane header mod finds its own with
