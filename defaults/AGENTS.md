@@ -399,8 +399,10 @@ The tab block says how each pane of the shown tab is wrapped:
   mod draws no divider: the header shares the terminal's background.
   The shipped `tabs` mod shows Chat and Terminal icons beside its + button for
   the open tab's focused pane, when the `ovis-chat` mod is installed and an Ovis
-  server on herdr-core at `shared("ovis.server")` (default
-  `http://127.0.0.1:7318`) sees an agent in that pane: Chat runs
+  server on herdr-core sees an agent in that pane: for this computer's panes the
+  one at `shared("ovis.server")` (default `http://127.0.0.1:7318`), for another
+  machine's panes that machine's own Ovis, `shared("ovis.servers")[machine]`
+  (none set: no icons; the pane id goes without its `machine/`). Chat runs
   `pane.view {pane, mod: "ovis-chat", props: {server, paneId}}`, Terminal runs
   `pane.view {pane}`.
 - `lone: true` frames a tab's only pane too (default: only when split).

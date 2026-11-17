@@ -21,8 +21,9 @@ class Element {
 const strip = (src: string) => src.replace(/^import .*;\n/gm, "").replace(/^export (?=(function|async function|const))/gm, "");
 const chatSrc = await readFile(new URL("../defaults/mods/tabs/chat.js", import.meta.url), "utf8");
 let server: unknown = null;
-const chat = new Function("appHome", "readTextFile", "shared", strip(chatSrc) + "\nreturn { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget };")(
-  () => "/home/me/.config/herdr-app", async () => "{}", () => server);
+const chat = new Function("appHome", "readTextFile", "shared", strip(chatSrc) + "\nreturn { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine };")(
+  () => "/home/me/.config/herdr-app", async () => "{}", (key: string) => key === "ovis.servers" ? servers : server);
+let servers: unknown = null;
 
 test("the Ovis pane is the herdr-app pane (its layout node id), else the one showing that terminal; only agents count", () => {
   const ovis = [{ pane_id: "p1", terminal_id: "t1", agent: "claude-code" }, { pane_id: "hc:loose:t9", terminal_id: "t9", agent: "codex" }, { pane_id: "p2", terminal_id: "t2", agent: null }];
@@ -31,13 +32,19 @@ test("the Ovis pane is the herdr-app pane (its layout node id), else the one sho
   expect(chat.ovisPaneId(ovis, "p7", "t8")).toBeNull();
   expect(chat.ovisPaneId(ovis, "p2", "t2")).toBeNull();
   expect(chat.ovisPaneId(null, "p1", "t1")).toBeNull();
+  // another machine's pane, asked of that machine's own Ovis
+  expect(chat.ovisPaneId(ovis, "vm/p1", "vm/t1")).toBe("p1");
+  expect(chat.ovisPaneId(ovis, "vm/p7", "vm/t9")).toBe("hc:loose:t9");
 });
 
-test("the icons act on the open tab's focused pane, on this Mac only", () => {
-  const all = [{ pane: "p1", terminal: "t1", tab: "tb1" }, { pane: "p2", terminal: "t2", tab: "tb1", focused: true }, { pane: "m/p3", terminal: "m/t3", tab: "m/tb2", focused: true }];
+test("the icons act on the open tab's focused terminal pane, on any machine", () => {
+  const all = [{ pane: "p1", terminal: "t1", tab: "tb1" }, { pane: "p2", terminal: "t2", tab: "tb1", focused: true }, { pane: "m/p3", terminal: "m/t3", tab: "m/tb2", focused: true }, { pane: "p4", tab: "tb3" }];
   expect(chat.chatTarget(all, "tb1").pane).toBe("p2");
-  expect(chat.chatTarget(all, "m/tb2")).toBeNull();
+  expect(chat.chatTarget(all, "m/tb2").pane).toBe("m/p3");
+  expect(chat.chatTarget(all, "tb3")).toBeNull();
   expect(chat.chatTarget(all, "none")).toBeNull();
+  expect(chat.onMachine("m/p3")).toEqual({ machine: "m", id: "p3" });
+  expect(chat.onMachine("p1")).toEqual({ machine: "", id: "p1" });
 });
 
 test("the default server is the Ovis on herdr-core, port 7318; shared(\"ovis.server\") changes it", () => {
@@ -46,6 +53,16 @@ test("the default server is the Ovis on herdr-core, port 7318; shared(\"ovis.ser
   server = "http://127.0.0.1:7400/";
   expect(chat.ovisServer()).toBe("http://127.0.0.1:7400");
   server = null;
+});
+
+test("another machine's Ovis is shared(\"ovis.servers\")[machine]; none set: no server, no icons", async () => {
+  servers = null;
+  expect(chat.ovisServer("vm")).toBeNull();
+  expect(await chat.ovisPanes(null)).toBeNull();
+  servers = { vm: "http://127.0.0.1:7328/" };
+  expect(chat.ovisServer("vm")).toBe("http://127.0.0.1:7328");
+  expect(chat.ovisServer("other")).toBeNull();
+  servers = null;
 });
 
 // the tab bar with those icons
@@ -73,7 +90,7 @@ test("Chat and Terminal sit beside +; Chat shows ovis-chat in place of the termi
   const view = new Tabs();
   view.init();
   expect(find(view.render(), "chat-view")).toEqual([]); // Ovis has not said it is an agent
-  view.chat = { pane: "p1", ovis: "p1" };
+  view.chat = { pane: "p1", ovis: "p1", server: "http://127.0.0.1:7318" };
   const bar = view.render();
   expect(find(bar, "tab-new")).toHaveLength(1);
   click(find(bar, "chat-view")[0]!);

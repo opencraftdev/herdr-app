@@ -1,7 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, checking } from "herdr";
-import { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget } from "./chat.js";
+import { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine } from "./chat.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -31,7 +31,7 @@ function label(tab, lead) {
 export default class Tabs extends View {
   init(_props, cx) {
     this.pressed = null;
-    this.chat = { pane: null, ovis: null }; // the pane the Chat icon opens, and its Ovis pane id
+    this.chat = { pane: null, ovis: null, server: null }; // the pane the Chat icon opens, its Ovis and pane id there
     this.scroll = ScrollHandle.new();
     try { this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { this.panels = {}; }
     if (!this.panels || typeof this.panels !== "object" || Array.isArray(this.panels)) this.panels = {};
@@ -46,12 +46,13 @@ export default class Tabs extends View {
     const space = spaces().find(p => p.active);
     const target = chatTarget(panes(), space?.tabs?.find(tab => tab.active)?.id);
     if (!target) {
-      if (this.chat.ovis !== null) { this.chat = { pane: null, ovis: null }; cx.notify(); }
+      if (this.chat.ovis !== null) { this.chat = { pane: null, ovis: null, server: null }; cx.notify(); }
       return;
     }
+    const server = ovisServer(onMachine(target.pane).machine);
     cx.spawn(async (cx) => {
-      const ovis = ovisPaneId(await ovisPanes(ovisServer()), target.pane, target.terminal);
-      if (ovis !== this.chat.ovis || target.pane !== this.chat.pane) { this.chat = { pane: target.pane, ovis }; cx.notify(); }
+      const ovis = ovisPaneId(await ovisPanes(server), target.pane, target.terminal);
+      if (ovis !== this.chat.ovis || target.pane !== this.chat.pane) { this.chat = { pane: target.pane, ovis, server }; cx.notify(); }
     });
   }
 
@@ -67,7 +68,7 @@ export default class Tabs extends View {
       .hover(s => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click(() => { if (!on) run("pane.view", args); }).child(svg(`mods/tabs/${name}.svg`).size(16));
     return h_flex().flex_none().gap(4)
-      .child(icon("chat-view", "chat", "Chat", shown, { pane: target.pane, mod: CHAT, props: { server: ovisServer(), paneId: ovis ?? target.pane } }))
+      .child(icon("chat-view", "chat", "Chat", shown, { pane: target.pane, mod: CHAT, props: { server: this.chat.server, paneId: ovis } }))
       .child(icon("terminal-view", "terminal", "Terminal", !shown, { pane: target.pane }));
   }
 
