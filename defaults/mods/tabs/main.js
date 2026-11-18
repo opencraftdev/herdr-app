@@ -1,7 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, run, exec, openOverlay, theme, window, shared, layout, settings, checking } from "herdr";
-import { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine, voiceLink } from "./chat.js";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, checking } from "herdr";
+import { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine } from "./chat.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -67,12 +67,7 @@ export default class Tabs extends View {
       .when(on, el => el.bg(t.hover).text_color(t.solid)).when(!on, el => el.text_color(t.dim))
       .hover(s => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click(() => { if (!on) run("pane.view", args); }).child(svg(`mods/tabs/${name}.svg`).size(16));
-    // Voice (the Assistant only, on a Mac): its call runs in the OCraft Voice window, which has the microphone a mod lacks
-    const voice = window()?.platform === "macos" ? voiceLink(this.chat.server, ovis, target.cwd) : null;
     return h_flex().flex_none().gap(4)
-      .when(Boolean(voice), el => el.child(h_flex().id("voice-view").size(34).flex_none().items_center().justify_center().rounded(8).tooltip("Talk to the Assistant")
-        .text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click(() => { exec("open", ["-a", "OCraft Voice", voice]).catch(() => {}); }).child(svg("mods/tabs/voice.svg").size(16))))
       .child(icon("chat-view", "chat", "Chat", shown, { pane: target.pane, mod: CHAT, props: { server: this.chat.server, paneId: ovis } }))
       .child(icon("terminal-view", "terminal", "Terminal", !shown, { pane: target.pane }));
   }

@@ -65,13 +65,3 @@ export function chatTarget(all, tab) {
   const p = inTab.find((x) => x.focused) ?? inTab[0];
   return p && p.terminal ? p : null;
 }
-
-/**
- * The Assistant's voice for an agent pane, as an OCraft Voice window opens it (Ovis repo,
- * herdr-mods/voice-window): the Ovis web app's voice view on that pane. Only the Assistant has a
- * voice: an agent started in the orchestrator's folder (or the Ovis Assistant VM's own). Else null.
- */
-export function voiceLink(server, ovisPane, cwd) {
-  if (!server || !ovisPane || !/\/(?:ovis\/assistant\/agent|orchestrator)\/?$/.test(String(cwd ?? ""))) return null;
-  return `${server}/?pane=${encodeURIComponent(ovisPane)}&view=chat&assistant=voice`;
-}

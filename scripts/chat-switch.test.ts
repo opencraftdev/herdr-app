@@ -21,7 +21,7 @@ class Element {
 const strip = (src: string) => src.replace(/^import .*;\n/gm, "").replace(/^export (?=(function|async function|const))/gm, "");
 const chatSrc = await readFile(new URL("../defaults/mods/tabs/chat.js", import.meta.url), "utf8");
 let server: unknown = null;
-const chat = new Function("appHome", "readTextFile", "shared", strip(chatSrc) + "\nreturn { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine, voiceLink };")(
+const chat = new Function("appHome", "readTextFile", "shared", strip(chatSrc) + "\nreturn { CHAT, ovisServer, ovisPanes, ovisPaneId, chatTarget, onMachine };")(
   () => "/home/me/.config/herdr-app", async () => "{}", (key: string) => key === "ovis.servers" ? servers : server);
 let servers: unknown = null;
 
@@ -73,7 +73,7 @@ const values: Record<string, unknown> = {
   View: class {}, div: () => new Element(), svg: () => new Element(), image: () => new Element(), h_flex: () => new Element(),
   ScrollHandle: { new: () => ({ scroll_to_item() {} }) },
   spaces: () => [{ id: "s1", active: true, tabs: [{ id: "tb1", name: "a", active: true }] }],
-  panes: () => [pane], run(command: string, args: unknown) { ran.push([command, args]); }, exec: async () => ({ code: 0 }), openOverlay() {}, theme: () => ({}),
+  panes: () => [pane], run(command: string, args: unknown) { ran.push([command, args]); }, openOverlay() {}, theme: () => ({}),
   window: () => null, shared: () => null, layout: () => null, settings: () => ({ zoom: 1 }), checking: () => true,
   localStorage: { getItem: () => null, setItem() {} }, ...chat,
 };
@@ -100,12 +100,4 @@ test("Chat and Terminal sit beside +; Chat shows ovis-chat in place of the termi
   view.chat = { pane: null, ovis: null }; // the server stopped: the way back stays while the chat shows
   click(find(view.render(), "terminal-view")[0]!);
   expect(ran).toEqual([["pane.view", { pane: "p1" }]]);
-});
-
-test("Voice is the Assistant's only: an agent in the orchestrator's folder (or the Ovis Assistant's), with its Ovis pane", () => {
-  expect(chat.voiceLink("http://127.0.0.1:7328", "hc:loose:t5", "/home/me/orchestrator")).toBe("http://127.0.0.1:7328/?pane=hc%3Aloose%3At5&view=chat&assistant=voice");
-  expect(chat.voiceLink("http://x", "p1", "/home/me/.config/ovis/assistant/agent/")).not.toBeNull();
-  expect(chat.voiceLink("http://x", "p1", "/home/me/repo")).toBeNull();
-  expect(chat.voiceLink("http://x", null, "/home/me/orchestrator")).toBeNull();
-  expect(chat.voiceLink(null, "p1", "/home/me/orchestrator")).toBeNull();
 });
